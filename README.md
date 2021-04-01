@@ -14,11 +14,15 @@ The output file contains the result of each filtering operation ('1' for pass, '
 
 ### Compilation
 Before compiling GateKeeper-GPU, in the makefile please change the values of *READ_LENGTH* of reads (line = 39), and *ERROR_THRESHOLD* for the filtering (line = 40). After specifying these values, simply type inside of the version: <br>
-`make` <br>
+```
+make
+``` 
 
 ### Run
 To run GateKeeper-GPU: <br>
-`./gateKeeperGPU <input file> <number of GPUs> <verbose>` <br>
+```
+./gateKeeperGPU <input file> <number of GPUs> <verbose>
+```
 Input file should be in the format specified above. You can specify the number of GPU devices, GateKeeper-GPU supports up to 8 GPUs. *Verbose* mode can be used for debugging purposes. For debugging, please enter '1' in *verbose* option, otherwise enter '0'. 
 
 ## Citation
