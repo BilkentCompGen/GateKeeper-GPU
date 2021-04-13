@@ -26,7 +26,6 @@ LDFLAGS += $(CCFLAGS)
 
 # Common includes and paths for CUDA
 SRC_DIR := src
-OBJ_DIR := bin
 INC_DIR := include
 LIBRARIES :=
 LIBRARIES += -lgomp -lm #omp support
@@ -78,24 +77,24 @@ all: build
 
 build: gateKeeperGPU
 
-OBJS = $(OBJ_DIR)/common.o $(OBJ_DIR)/cuda_config.o $(OBJ_DIR)/main.o $(OBJ_DIR)/kernel.o
+OBJS = common.o cuda_config.o main.o kernel.o
 
-$(OBJ_DIR)/common.o: $(SRC_DIR)/common.c
+common.o: $(SRC_DIR)/common.c
 	$(NVCC) $(CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
-$(OBJ_DIR)/kernel.o: $(SRC_DIR)/kernel.cu
+kernel.o: $(SRC_DIR)/kernel.cu
 	$(NVCC) $(MACRO_FLAGS) $(CCFLAGS) $(GENCODE_FLAGS) -o $@ -c -dc $<
 
-$(OBJ_DIR)/cuda_config.o: $(SRC_DIR)/cuda_config.c
+cuda_config.o: $(SRC_DIR)/cuda_config.c
 	$(NVCC) $(MACRO_FLAGS) $(CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
-$(OBJ_DIR)/main.o: $(SRC_DIR)/main.c
+main.o: $(SRC_DIR)/main.c
 	$(NVCC) $(MACRO_FLAGS) $(CCFLAGS) $(GENCODE_FLAGS) -lm -o $@ -c $<
 
 gateKeeperGPU:$(OBJS)
 	$(NVCC) $(LDFLAGS) $(GENCODE_FLAGS) -o $@ $+ $(LIBRARIES)
 
 clean:
-	rm -f gateKeeperGPU bin/* *.o
+	rm -f gateKeeperGPU *.o
 
 clobber: clean
