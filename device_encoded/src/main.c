@@ -595,6 +595,5 @@ int main(int argc, char *argv[])
 		} // else : file check
 	}
 
-	printf("PEACE OUT !\n");
 	return 0;
 }

@@ -25,9 +25,9 @@ CCFLAGS := -O3 -Xcompiler -fopenmp
 LDFLAGS += $(CCFLAGS)
 
 # Common includes and paths for CUDA
-SRC_DIR = src
-OBJ_DIR = bin
-INC_DIR = include
+SRC_DIR := src
+OBJ_DIR := bin
+INC_DIR := include
 LIBRARIES :=
 LIBRARIES += -lgomp -lm #omp support
 LIBRARIES += $(NVCC_LIBS)
