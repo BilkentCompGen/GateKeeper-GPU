@@ -5,12 +5,12 @@ Calculating the similarities and differences between two sequences is a computat
 In preprocessing steps of GateKeeper-GPU, the sequences are encoded in 2-bit format. We provide GateKeeper-GPU in two versions: host-encoded and device-encoded.  Encoding is carried out in CPU in [host-encoded](host_encoded) version and the bulk of encoded sequences are transferred to GPU. In [device-encoded](device_encoded) version, sequences are copied  to GPU in string format and each GPU thread encodes its own sequence pairs. Either one of these versions can be used depending on the read mapper's workflow. For instance, if the mapper already has an encoding mechanism, using host-encoded version can be more suitable.
 
 ### Requirements
-GateKeeper-GPU requires CUDA-10 with compute capability 3.5 or above. It works best with compute capability 6.x or above, since data prefetching is involved in some stages. 
+GateKeeper-GPU requires OpenMP and CUDA-10 with compute capability 3.5 or above. It works best with compute capability 6.x or above, since data prefetching is involved in some stages. 
 
 ### Input/Output Format
 For now, GateKeeper-GPU accepts input files in which each line contains a single tab-separated sequence pair for comparison: <br>
 `[read] [reference segment]` <br>
-The output file contains the result of each filtering operation ('1' for pass, '0' for reject) in each line. 
+At the end of the execution, two output files are generated. *Filter file* contains the result of each filtering operation ('1' for pass, '0' for reject) in each line. *Edit file* contains the edit distances approximated by GateKeeper-GPU.  
 
 ### Compilation
 Before compiling GateKeeper-GPU, in the makefile please change the values of *READ_LENGTH* of reads (line = 39), and *ERROR_THRESHOLD* for the filtering (line = 40). After specifying these values, simply type inside of the version: <br>
