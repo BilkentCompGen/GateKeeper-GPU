@@ -2,7 +2,7 @@
 ################################################################################
 
 # Location of the CUDA Toolkit
-CUDA_PATH ?= /usr/local/cuda
+CUDA_PATH ?= /truba/sw/centos7.3/lib/cuda/10.1
 
 # host compiler
 CC = g++
@@ -36,7 +36,7 @@ LIBRARIES += $(NVCC_LIBS)
 
 # Modify only these :
 READ_LENGTH = 100
-ERROR_THRESHOLD = 1
+ERROR_THRESHOLD = 5
 MAX_GPU = 8
 
 #### DO NOT CHANGE BELOW THIS LINE---------------------------------------------

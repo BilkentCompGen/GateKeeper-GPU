@@ -18,6 +18,7 @@
 
 // WINDOW_COUNT, A_WINDOW_COUNT, TOTAL_MASKS are defined in makefile.
 float longest_gpu_time;
+double time_io, time_gkgpu; // GateKeeper-GPU time from host side
 
 // For time calculations
 double dtime()
@@ -31,7 +32,7 @@ double dtime()
 
 /* Reader Function */
 int reader(FILE *in_file, long int batch_size, int *eof, int *file_index, int maxThreadPerBlock,
-			int *remaining_batch_size, int last_index, int device)
+			int *remaining_batch_size, int last_index, int device, int start_index)
 {
 	char *line = NULL;
 	size_t line_size = 0;
@@ -55,14 +56,14 @@ int reader(FILE *in_file, long int batch_size, int *eof, int *file_index, int ma
 
 			line_tracer = 0, read_l = 0, ref_l = 0;
 			while (read_l != READ_LENGTH){
-				h_read_buffer[device][batch_counter * READ_LENGTH + read_l] = line[line_tracer];
+				h_read_buffer[device][(start_index + batch_counter) * READ_LENGTH + read_l] = line[line_tracer];
 				line_tracer++;
 				read_l++;
 			}
 
 			line_tracer++;
 			while (ref_l != READ_LENGTH){
-				h_ref_buffer[device][batch_counter * READ_LENGTH + ref_l] = line[line_tracer];
+				h_ref_buffer[device][(start_index + batch_counter) * READ_LENGTH + ref_l] = line[line_tracer];
 				line_tracer++;
 				ref_l++;
 			}
@@ -139,7 +140,8 @@ void reporter(FILE *filter_file, FILE *edit_file, long int batch_size, RES_NODE 
 }
 
 /* Main driver function of the program */
-double singleGPU_driver(char *inputfile, int error_threshold, char *filter_file_name, char *edit_file_name)
+double singleGPU_driver(char *inputfile, int error_threshold, char *filter_file_name, char *edit_file_name,
+						int numThreads)
 {
 	int currentDevice = 0; // TODO: recognize this in cuda_config.c
 	int i, j, tracer;
@@ -147,12 +149,14 @@ double singleGPU_driver(char *inputfile, int error_threshold, char *filter_file_
 	int file_index = 0, pass_status = 0, undefined = 0, r_batch_size = 0;
 	int num_blocks = 0, deviceCount = 0, maxThreadPerBlock = 0;
 	long int batch_size = 0;
-	int reader_status = 0, eof = 0; // remaining batch size
+	int reader_status = SUCCESSFUL_MISSION, eof = 0; // remaining batch size
 	RES_NODE *res_head = NULL, *current_node = NULL, *new_node = NULL;
 	int loop_count = 0,  rejected = 0;
 	int passer_counts[ERROR_THRESHOLD+1];
 	double tstart_pre = 0, tstop_pre = 0,  tstart_exe = 0, tstop_exe = 0, t_exe = 0;
 	double tstart_repo = 0, tstop_repo = 0;
+	double time_io_start = 0, time_gkgpu_start = 0;
+	time_io = 0, time_gkgpu = 0;
 
 	// CUDA CONFIG: Calculation of GPU params
 	// batch_size : # simultaneous operations per GPU 
@@ -174,10 +178,38 @@ double singleGPU_driver(char *inputfile, int error_threshold, char *filter_file_
 	res_head -> next = NULL;
 	res_head -> filt_result = NULL;
 	res_head -> edits = NULL;
+	current_node = res_head;
 	
 	// Device Allocations    
 	setDevice(currentDevice);
 	singleDeviceAlloc(batch_size, currentDevice);
+
+	// Multithreading operations
+	int line_num = 0;
+	char * line = NULL;
+	size_t line_size = 0;
+	int start_indices[numThreads];
+	int finish_indices[numThreads];
+	long int start_pos[numThreads];
+	long int finish_pos[numThreads];
+	long int file_size = 0, sample_size = 0;
+	int thread;
+
+	// Finding file size and comparison count
+	time_io_start = dtime();
+	in_file = fopen(inputfile, "r");
+	if (getline(&line, &line_size, in_file) != -1){
+		sample_size = ftell(in_file);
+	}
+	fseek(in_file, 0, SEEK_END);
+	file_size = ftell(in_file);
+	fclose(in_file);
+	line_num = file_size / sample_size;
+	int temp_loop_count = line_num / batch_size;
+	r_batch_size = line_num - (batch_size * temp_loop_count);
+	long int portion_size = batch_size / numThreads;
+	long int last_portion_size = batch_size - (portion_size * (numThreads-1));
+	time_io += dtime() - time_io_start;
 	
 	if (debug_mode == ON){
 		tstop_pre = dtime();
@@ -185,9 +217,6 @@ double singleGPU_driver(char *inputfile, int error_threshold, char *filter_file_
 	}
 	
 	// MAIN OPERATION
-	in_file = fopen(inputfile, "r");
-	current_node = res_head;
-
 	tstart_exe = dtime();
 	do {
 
@@ -203,22 +232,70 @@ double singleGPU_driver(char *inputfile, int error_threshold, char *filter_file_
 		new_node -> next = NULL;
 		new_node -> filt_result = NULL;
 
-		// Reading Procedure
-		reader_status = reader(in_file, batch_size, &eof, &file_index, maxThreadPerBlock,
-			&r_batch_size, -1, currentDevice);
+		// Reading + Data Transfer to Unified Memory
+		time_io_start = dtime();
+		if (loop_count == temp_loop_count+1){
+			eof = EOF_;
+			if (r_batch_size != 0){
+				reader_status = PARTIAL_BATCH;
+				portion_size = r_batch_size / numThreads;
+				last_portion_size = r_batch_size - (portion_size * (numThreads-1));
+			}
+			// fprintf(stderr, "entering r batch = %d\n", r_batch_size);
+		}
+
+		//File Padding
+		#pragma omp parallel for num_threads(numThreads)
+		for (thread = 0; thread < numThreads; thread++){
+			start_indices[thread] = file_index + (portion_size * thread);
+			finish_indices[thread] = start_indices[thread] + portion_size - 1;
+
+			start_pos[thread] = (long int)start_indices[thread] * sample_size;
+		}
+
+		if (loop_count == temp_loop_count+1){
+			finish_indices[numThreads-1] = line_num - 1;
+		}
+		finish_indices[numThreads-1] = file_index + batch_size - 1;
+		start_pos[0] = file_index * sample_size;
+
+		#pragma omp parallel for num_threads(numThreads) 
+		for (thread = 0; thread < numThreads; thread++){
+
+			// Local vars
+			FILE *thr_file = fopen(inputfile, "r");
+			fseek(thr_file, start_pos[thread], SEEK_SET);
+
+			int thr_file_index = start_indices[thread];
+			int thr_reader_status = 0, thr_eof = 0; // remaining batch size
+			int thr_r_batch_size = 0;
+			int thr_portion_size = portion_size;
+			if (thread == numThreads - 1){
+				thr_portion_size = last_portion_size;
+			}
+
+			thr_reader_status = reader(thr_file, thr_portion_size, &thr_eof, &thr_file_index, maxThreadPerBlock,
+									&thr_r_batch_size, finish_indices[thread]+1, currentDevice, thread * portion_size);
+
+			if (thr_reader_status == ABORT_MISSION){
+				reader_status = ABORT_MISSION;
+			}
+			fclose(thr_file);
+		}
 
 		if (reader_status == ABORT_MISSION){
 			fprintf(stderr, "\nError: Reader Status = ABORT MISSION, exiting...\n");
-			fclose(in_file); 
 			clearSingleDevice(res_head, currentDevice);
 			exit(EXIT_FAILURE);
 		}
+		time_io += dtime() - time_io_start;
 
 		// New node binding for results node
 		current_node -> next = new_node;
 		current_node = current_node -> next;
 
 		// Kernel Call
+		time_gkgpu_start = dtime();
 		if (reader_status == PARTIAL_BATCH){
 			num_blocks = ceil((double)r_batch_size / (double)maxThreadPerBlock);
 			int dummy_r_batch_size = r_batch_size;
@@ -236,6 +313,8 @@ double singleGPU_driver(char *inputfile, int error_threshold, char *filter_file_
 			run_singleGPU_unified(batch_size, num_blocks,
 				maxThreadPerBlock, new_node, currentDevice);
 		}
+		time_gkgpu += dtime() - time_gkgpu_start;
+		file_index = file_index + (new_node -> batch_size);
 		
 	} while(eof != EOF_) ;// while : MAIN LOOP ends here
 
@@ -245,9 +324,6 @@ double singleGPU_driver(char *inputfile, int error_threshold, char *filter_file_
 		printf("---Time Report: Main Operation took %10.3lf seconds.\n", t_exe);
 	}
 	res_head -> loop_count = loop_count;
-	
-	// Free some
-	fclose(in_file);
 	
 	// REPORTING
 	filter_file = fopen(filter_file_name, "w");
@@ -409,7 +485,7 @@ double multiGPU_driver(char *inputfile, int error_threshold, int deviceCount_cmd
 
 			// Reading Procedure
 			reader_status = reader(dev_file, batch_size, &eof, &dev_file_index, maxThreadPerBlock,
-				&r_batch_size, finish_indices[device]+1, device);
+				&r_batch_size, finish_indices[device]+1, device, 0);
 
 			if (reader_status == ABORT_MISSION){
 				fclose(in_file);
@@ -515,7 +591,7 @@ double multiGPU_driver(char *inputfile, int error_threshold, int deviceCount_cmd
 int main(int argc, char *argv[])
 {
 
-	if(argc < 4){
+	if(argc < 5){
 		fprintf(stderr, "Missing Argument, exiting...\n");
 		exit(1);
 	}
@@ -525,6 +601,7 @@ int main(int argc, char *argv[])
 		char *inputfile = argv[1];
 		int deviceCount_cmd = atoi(argv[2]);
 		debug_mode = atoi(argv[3]); //in common.h
+		int numThreads = atoi(argv[4]);
 		kernel_analysis_mode = (debug_mode == 1 ? ON : OFF);
 		if (debug_mode == ON){
 			printf("---Debugging mode activated.\n");
@@ -570,15 +647,15 @@ int main(int argc, char *argv[])
 			}
 			else if (deviceCount_cmd == 1){
 				exe_mode = SINGLE;
-				printf("\nRunning on single GPU mode...\n");
-				printf("Execution begins with error threshold %d...\n", ERROR_THRESHOLD);
+				printf("\nRunning on single GPU mode, device_encoded...\n");
+				printf("Execution begins with error threshold %d, %d threads\n", ERROR_THRESHOLD, numThreads);
 				tstart = dtime();
-				t_exe = singleGPU_driver(inputfile, ERROR_THRESHOLD, filter_file_name, edit_file_name);
+				t_exe = singleGPU_driver(inputfile, ERROR_THRESHOLD, filter_file_name, edit_file_name, numThreads);
 				tstop = dtime();
 			}
 			else {
 				exe_mode = MULTIPLE;
-				printf("\nRunning on multi-GPU mode(%d)...\n", deviceCount_cmd);
+				printf("\nRunning on multi-GPU mode(%d), device_encoded...\n", deviceCount_cmd);
 				printf("Execution begins with error threshold %d...\n", ERROR_THRESHOLD);
 				tstart = dtime();
 				t_exe = multiGPU_driver(inputfile, ERROR_THRESHOLD, deviceCount_cmd, filter_file_name, edit_file_name);
@@ -588,10 +665,12 @@ int main(int argc, char *argv[])
 			ttime = tstop - tstart;
 			if (kernel_analysis_mode == ON){
 				// measures filtration from kernel side, cuda-calculated
-				printf("\nKernel filtration time (msecs): %f\n", longest_gpu_time); 
+				printf("\n0-Kernel filtration time (msecs): %f\n", longest_gpu_time); 
 			}
-			printf("Only filtration time (secs): %10.3lf\n", t_exe);
-			printf("Overall execution time (secs): %10.3lf\n", ttime);
+			printf("\n1-GateKeeper-GPU time (from host) (secs): %10.3lf\n", time_gkgpu);	
+			printf("2-IO reading + data transfer time (secs): %10.3lf\n", time_io); // data transfer = filling unified memory buffers
+			printf("3-Total filtration time (secs): %10.3lf\n", t_exe); 	//measures filtration from host side, wraps the while loop of all batches: edlib included
+			printf("4-Overall execution time (secs): %10.3lf\n", ttime);
 		} // else : file check
 	}
 

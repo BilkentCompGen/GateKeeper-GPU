@@ -21,9 +21,9 @@ make
 ### Run
 To run GateKeeper-GPU: <br>
 ```
-./gateKeeperGPU <input file> <number of GPUs> <verbose>
+./gateKeeperGPU <input file> <number of GPUs> <verbose> <n_threads>
 ```
-Input file should be in the format specified above. You can specify the number of GPU devices, GateKeeper-GPU supports up to 8 GPUs. *Verbose* mode can be used for debugging purposes. For debugging, please enter '1' in *verbose* option, otherwise enter '0'. 
+Input file should be in the format specified above. You can specify the number of GPU devices, GateKeeper-GPU supports up to 8 GPUs. *Verbose* mode can be used for debugging purposes. For debugging, please enter '1' in *verbose* option, otherwise enter '0'. n_threads denotes the number of threads for IO operations. In host_encoded version, encoding is also included in multi-threaded IO operations.  
 
 ## Citation
 Please visit our full paper arXiv preprint of [GateKeeper-GPU](https://arxiv.org/abs/2103.14978) for more design details and analyses. 
