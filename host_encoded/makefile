@@ -2,7 +2,7 @@
 ################################################################################
 
 # Location of the CUDA Toolkit
-CUDA_PATH ?= /truba/sw/centos7.3/lib/cuda/10.1
+CUDA_PATH ?= /usr/local/cuda
 
 # host compiler
 CC = g++
